@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scrabble Game</title>
+    <link rel="stylesheet" href="scrabble.css">
+</head>
+<body>
+    <div id="setup-overlay">
+        <div class="setup-card">
+            <h1>Scrabble</h1>
+            <p>Select number of players:</p>
+            <div class="player-buttons">
+                <button onclick="startGame(1)">1 Player</button>
+                <button onclick="startGame(2)">2 Players</button>
+                <button onclick="startGame(3)">3 Players</button>
+                <button onclick="startGame(4)">4 Players</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-container" style="display: none;">
+        
+        <div id="game-stage">
+            <div id="board-container">
+                <div id="player-turn-indicator">Waiting...</div>
+                <div id="scrabble-board"></div>
+                
+                <div class="main-actions">
+                    <button id="submit-word">Submit Word</button>
+                    <button id="exchange-tiles">Exchange Tiles</button>
+                    <button id="reset-board">Reset</button>
+                    <button id="pass-turn">Pass</button>
+                </div>
+            </div>
+
+            <div id="player-area-1" class="player-side pos-left"></div>
+            <div id="player-area-2" class="player-side pos-right"></div>
+            <div id="player-area-3" class="player-side pos-top"></div>
+            <div id="player-area-4" class="player-side pos-bottom"></div>
+        </div>
+
+        <div id="move-history">
+            <h3>History</h3>
+            <ul id="history-list"></ul>
+        </div>
+    </div>
+
+    <script src="scrabble.js"></script>
+</body>
+
+</html>

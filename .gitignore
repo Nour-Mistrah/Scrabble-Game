@@ -1,0 +1,13 @@
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Secrets 
+.env
+
+# Dependencies 
+node_modules/
+
+# IDE settings
+.vscode/
+.idea/
