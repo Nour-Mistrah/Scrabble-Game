@@ -9,6 +9,26 @@ let consecutiveScorelessTurns = 0;
 const MAX_SCORELESS_TURNS = 6;
 let gameOver = false;
 
+// History UI (one table per player)
+let playerHistoryTBodies = [];
+
+// --- Mobile-friendly input ---
+// HTML drag/drop is unreliable on phones; support "tap-to-place".
+function isTouchDevice() {
+  return ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+}
+
+let exchangeSelectionMode = false; // when true: taps on rack tiles select for exchanging
+let tileForPlacement = null; // { playerIdx: number (0-based), rackIndex: number, letter: string }
+
+function clearPlacementSelection() {
+  tileForPlacement = null;
+}
+
+function clearExchangeSelection() {
+  document.querySelectorAll('.selected-for-exchange').forEach(t => t.classList.remove('selected-for-exchange'));
+}
+
 const distribution = {
   'A': 9, 'B': 2, 'C': 2, 'D': 4, 'E': 12, 'F': 2, 'G': 3, 'H': 2, 'I': 9,
   'J': 1, 'K': 1, 'L': 4, 'M': 2, 'N': 6, 'O': 8, 'P': 2, 'Q': 1, 'R': 6,
@@ -22,6 +42,48 @@ const letterValues = {
   'S': 1, 'T': 1, 'U': 1, 'V': 4, 'W': 4, 'X': 8, 'Y': 4, 'Z': 10,
   '?': 0
 };
+
+// Memoize dictionary lookups (dictionary is static, but lookups are frequent).
+const wordValidityCache = new Map(); // key: UPPERCASE word, value: boolean
+
+let dictionarySet = null; // Set<string> of valid words loaded from dictionary.txt
+let dictionaryLoadPromise = null;
+let dictionaryLoadErrorShown = false;
+
+async function ensureDictionaryLoaded() {
+  if (dictionarySet) return;
+  if (dictionaryLoadPromise) return dictionaryLoadPromise;
+
+  dictionaryLoadPromise = (async () => {
+    try {
+      const res = await fetch("./dictionary.txt");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+
+      // dictionary.txt is expected to be "one word per line", uppercase A-Z.
+      const words = text
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(Boolean)
+        .map(w => w.toUpperCase());
+
+      dictionarySet = new Set(words);
+    } catch (e) {
+      // If the dictionary can't be loaded (common when opening via file://),
+      // fall back to an empty set so all words are rejected instead of crashing.
+      dictionarySet = new Set();
+      if (!dictionaryLoadErrorShown) {
+        dictionaryLoadErrorShown = true;
+        alert(
+          "Could not load dictionary.txt.\n" +
+          "Please run the app from a local server (http://...) so fetch() can access dictionary.txt."
+        );
+      }
+    }
+  })();
+
+  return dictionaryLoadPromise;
+}
 
 const tw = [0, 7, 14, 105, 119, 210, 217, 224];
 const dw = [16, 28, 32, 42, 48, 56, 64, 70, 154, 160, 168, 176, 182, 192, 196, 208];
@@ -39,6 +101,10 @@ const inBounds = (r, c) => r >= 0 && r < 15 && c >= 0 && c < 15;
 function endTurnNoScore(reason = "pass") {
   if (gameOver) return;
 
+  exchangeSelectionMode = false;
+  clearPlacementSelection();
+  clearExchangeSelection();
+
   consecutiveScorelessTurns += 1;
 
   if (consecutiveScorelessTurns >= MAX_SCORELESS_TURNS) {
@@ -53,6 +119,42 @@ function endTurnNoScore(reason = "pass") {
 
 const passBtn = document.getElementById('pass-turn');
 if (passBtn) passBtn.addEventListener('click', () => endTurnNoScore("pass"));
+
+// Scores modal
+const scoresBtn = document.getElementById('scores');
+const scoresModal = document.getElementById('scores-modal');
+const closeScoresBtn = document.getElementById('close-scores');
+const scoresTbody = document.getElementById('scores-tbody');
+
+function renderScoresTable() {
+  if (!scoresTbody) return;
+  scoresTbody.innerHTML = "";
+  for (let i = 0; i < numPlayers; i++) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>Player ${i + 1}</td><td>${playerScores[i]}</td>`;
+    scoresTbody.appendChild(tr);
+  }
+}
+
+function openScoresModal() {
+  if (!scoresModal) return;
+  renderScoresTable();
+  scoresModal.style.display = "flex";
+}
+
+function closeScoresModal() {
+  if (!scoresModal) return;
+  scoresModal.style.display = "none";
+}
+
+if (scoresBtn) scoresBtn.addEventListener('click', openScoresModal);
+if (closeScoresBtn) closeScoresBtn.addEventListener('click', closeScoresModal);
+
+if (scoresModal) {
+  scoresModal.addEventListener('click', (e) => {
+    if (e.target === scoresModal) closeScoresModal();
+  });
+}
 
 function rackPointSum(playerIdx) {
   return playerRacks[playerIdx].reduce((sum, ch) => sum + (letterValues[ch] ?? 0), 0);
@@ -169,6 +271,15 @@ function isFirstMove() {
   return document.querySelectorAll('.locked').length === 0;
 }
 
+/** Square indices that already had tiles locked before this turn (existing board letters). */
+function getLockedBoardIndices() {
+  const s = new Set();
+  for (let i = 0; i < 225; i++) {
+    if (getSquare(i).classList.contains("locked")) s.add(i);
+  }
+  return s;
+}
+
 function newTileIndices() {
   const allSquares = [...board.children];
   const newTiles = [...document.querySelectorAll('.tile-placed:not(.locked)')];
@@ -194,6 +305,7 @@ function rollbackNewTilesToRack() {
     sq.innerText = "";
     sq.classList.remove("tile-placed");
     sq.dataset.isBlank = "false";
+    delete sq.dataset.score;
 
     playerRacks[currentPlayer - 1].push(returnChar);
   });
@@ -226,6 +338,8 @@ window.startGame = function (count) {
   initializeBag();
   createBoard();
 
+  initHistoryTables();
+
   for (let i = 0; i < numPlayers; i++) {
     fillRackArray(i);
   }
@@ -234,6 +348,34 @@ window.startGame = function (count) {
   renderAllRacks();
 };
 
+function initHistoryTables() {
+  const container = document.getElementById("history-tables");
+  if (!container) return;
+
+  container.innerHTML = "";
+  playerHistoryTBodies = [];
+
+  for (let i = 0; i < numPlayers; i++) {
+    const playerNum = i + 1;
+
+    const table = document.createElement("table");
+    table.classList.add("player-history-table");
+    table.id = `history-table-${playerNum}`;
+
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th colspan="2">Player ${playerNum} History</th>
+        </tr>
+      </thead>
+      <tbody id="history-tbody-${playerNum}"></tbody>
+    `;
+
+    container.appendChild(table);
+    playerHistoryTBodies[i] = table.querySelector(`#history-tbody-${playerNum}`);
+  }
+}
+
 function setupPlayerArea(pNum) {
   const area = document.getElementById(`player-area-${pNum}`);
   if (!area) return;
@@ -241,6 +383,7 @@ function setupPlayerArea(pNum) {
     <div class="player-card">
       <h4>Player ${pNum}</h4>
       <div class="score-display" id="score-${pNum}">0</div>
+      <div class="turn-badge">Your Turn</div>
       <div id="rack-${pNum}" class="rack-grid"></div>
     </div>
   `;
@@ -263,6 +406,28 @@ function fillRackArray(playerIdx) {
   while (playerRacks[playerIdx].length < 7 && tileBag.length > 0) {
     playerRacks[playerIdx].push(drawTile());
   }
+}
+
+const BAG_LETTER_ORDER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ?".split("");
+
+function renderBagDisplay() {
+  const grid = document.getElementById("tile-bag-display");
+  const totalEl = document.getElementById("tile-bag-total");
+  if (!grid) return;
+
+  const counts = {};
+  for (const ch of tileBag) counts[ch] = (counts[ch] || 0) + 1;
+
+  grid.innerHTML = BAG_LETTER_ORDER.map((letter) => {
+    const n = counts[letter] ?? 0;
+    const displayLetter = letter === "?" ? "□" : letter;
+    return `<div class="bag-cell${n === 0 ? " bag-cell--empty" : ""}" title="${letter === "?" ? "Blank" : letter}: ${n} remaining">
+      <span class="bag-cell-letter">${displayLetter}</span>
+      <span class="bag-cell-count">${n}</span>
+    </div>`;
+  }).join("");
+
+  if (totalEl) totalEl.textContent = String(tileBag.length);
 }
 
 // --- 3. Rendering ---
@@ -302,20 +467,50 @@ function renderAllRacks() {
       tile.dataset.score = letterValues[letter] ?? 0;
 
       if (isCurrent && !gameOver) {
-        tile.setAttribute('draggable', true);
         tile.dataset.index = index;
 
-        tile.addEventListener('click', () => tile.classList.toggle('selected-for-exchange'));
+        const touch = isTouchDevice();
+        if (touch) {
+          // Visual selection for tap-to-place
+          if (
+            !exchangeSelectionMode &&
+            tileForPlacement &&
+            tileForPlacement.playerIdx === i &&
+            tileForPlacement.rackIndex === index
+          ) {
+            tile.classList.add('selected-for-place');
+          }
 
-        tile.addEventListener('dragstart', (e) => {
-          e.dataTransfer.setData('text/plain', letter);
-          e.dataTransfer.setData('source-index', String(index));
-          tile.id = "dragging-now";
-        });
+          tile.addEventListener('click', () => {
+            if (exchangeSelectionMode) {
+              // In exchange mode: tapping toggles exchange selection
+              tile.classList.toggle('selected-for-exchange');
+              tile.classList.remove('selected-for-place');
+              return;
+            }
 
-        tile.addEventListener('dragend', () => {
-          if (tile.id === "dragging-now") tile.id = "";
-        });
+            // Normal touch play: tap a rack tile to select it for placement.
+            tileForPlacement = { playerIdx: i, rackIndex: index, letter };
+            clearExchangeSelection();
+            exchangeSelectionMode = false;
+            renderAllRacks();
+          });
+        } else {
+          // Desktop: drag-drop placement, click toggles exchange selection
+          tile.setAttribute('draggable', true);
+
+          tile.addEventListener('click', () => tile.classList.toggle('selected-for-exchange'));
+
+          tile.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', letter);
+            e.dataTransfer.setData('source-index', String(index));
+            tile.id = "dragging-now";
+          });
+
+          tile.addEventListener('dragend', () => {
+            if (tile.id === "dragging-now") tile.id = "";
+          });
+        }
       } else {
         tile.classList.add('inactive-tile');
       }
@@ -323,6 +518,7 @@ function renderAllRacks() {
       rackElement.appendChild(tile);
     });
   }
+  renderBagDisplay();
 }
 
 function updateTurnUI() {
@@ -390,6 +586,7 @@ function setupDropZones() {
       square.innerText = (letter === '?' ? blankAs : letter);
       square.dataset.isBlank = (letter === '?' ? "true" : "false");
       square.classList.add('tile-placed');
+      square.dataset.score = letterValues[letter] ?? 0;
 
       // remove from rack
       playerRacks[currentPlayer - 1].splice(sourceIndex, 1);
@@ -404,6 +601,79 @@ function setupDropZones() {
         square.innerText = '';
         square.classList.remove('tile-placed');
         square.dataset.isBlank = "false";
+        delete square.dataset.score;
+        square.onclick = null;
+
+        playerRacks[currentPlayer - 1].push(returnLetter);
+        renderAllRacks();
+      };
+
+      renderAllRacks();
+    });
+
+    // Touch/click placement: tap a rack tile first, then tap a square.
+    square.addEventListener('click', () => {
+      if (gameOver) return;
+      if (!isTouchDevice()) return;
+      if (square.classList.contains('tile-placed')) return; // occupied (tap-to-return is handled after placement)
+      if (!tileForPlacement) return;
+      if (tileForPlacement.playerIdx !== currentPlayer - 1) return;
+
+      let letter = tileForPlacement.letter;
+      const sourceIndex = tileForPlacement.rackIndex;
+      const targetIdx = allSquares.indexOf(square);
+
+      // blank tile prompt
+      let blankAs = null;
+      if (letter === '?') {
+        blankAs = (prompt("Blank tile: choose a letter A-Z") || "").toUpperCase();
+        if (!/^[A-Z]$/.test(blankAs)) {
+          alert("Invalid blank letter.");
+          return;
+        }
+      }
+
+      const boardHasAnyTiles = document.querySelectorAll('.tile-placed').length > 0;
+      if (!boardHasAnyTiles && targetIdx !== 112) return alert("Start on the star!");
+
+      // Simple straight-line enforcement while placing
+      const currentTurnSquares = Array.from(document.querySelectorAll('.tile-placed:not(.locked)'));
+      if (currentTurnSquares.length > 0) {
+        const firstIdx = allSquares.indexOf(currentTurnSquares[0]);
+        const a = idxToRC(firstIdx);
+        const b = idxToRC(targetIdx);
+
+        if (currentTurnSquares.length === 1) {
+          if (a.r !== b.r && a.c !== b.c) return alert("Play in a straight line!");
+        } else {
+          const secondIdx = allSquares.indexOf(currentTurnSquares[1]);
+          const s = idxToRC(secondIdx);
+          const isHoriz = a.r === s.r;
+          if (isHoriz && b.r !== a.r) return alert("Stay in the row!");
+          if (!isHoriz && b.c !== a.c) return alert("Stay in the column!");
+        }
+      }
+
+      // Place on board
+      square.innerText = (letter === '?' ? blankAs : letter);
+      square.dataset.isBlank = (letter === '?' ? "true" : "false");
+      square.classList.add('tile-placed');
+      square.dataset.score = letterValues[letter] ?? 0;
+
+      // remove from rack
+      playerRacks[currentPlayer - 1].splice(sourceIndex, 1);
+      clearPlacementSelection();
+
+      // click to return tile (only if not locked)
+      square.onclick = () => {
+        if (square.classList.contains('locked') || gameOver) return;
+
+        const returnLetter = (square.dataset.isBlank === "true") ? "?" : square.innerText;
+
+        square.innerText = '';
+        square.classList.remove('tile-placed');
+        square.dataset.isBlank = "false";
+        delete square.dataset.score;
         square.onclick = null;
 
         playerRacks[currentPlayer - 1].push(returnLetter);
@@ -418,10 +688,32 @@ function setupDropZones() {
 // --- 5. Handlers ---
 async function exchangeSelectedTiles() {
   if (gameOver) return;
-
-  if (tileBag.length < 7) return alert("Bag must have 7+ tiles to exchange.");
+  const touch = isTouchDevice();
   const selected = document.querySelectorAll('.selected-for-exchange');
-  if (selected.length === 0) return alert("Select tiles to exchange first.");
+
+  if (!exchangeSelectionMode) {
+    // Touch UX: first tap enters "exchange selection mode"
+    if (selected.length === 0) {
+      if (touch) {
+        exchangeSelectionMode = true;
+        clearPlacementSelection();
+        renderAllRacks();
+        alert("Tap the rack tiles you want to exchange, then press Exchange again.");
+        return;
+      }
+      return alert("Select tiles to exchange first.");
+    }
+  } else {
+    // Exchange mode: require at least one tile selected
+    if (selected.length === 0) return alert("Select tiles to exchange first.");
+  }
+
+  clearPlacementSelection();
+
+  if (tileBag.length === 0) return alert("Tile bag is empty—cannot exchange.");
+  if (tileBag.length < selected.length) {
+    return alert(`Not enough tiles in the bag to exchange ${selected.length} tiles.`);
+  }
 
   if (!confirm(`Exchange ${selected.length} tiles and skip turn?`)) return;
 
@@ -440,6 +732,7 @@ async function exchangeSelectedTiles() {
     return;
   }
 
+  exchangeSelectionMode = false;
   currentPlayer = (currentPlayer % numPlayers) + 1;
   updateTurnUI();
   renderAllRacks();
@@ -449,21 +742,24 @@ const exchangeBtn = document.getElementById('exchange-tiles');
 if (exchangeBtn) exchangeBtn.addEventListener('click', exchangeSelectedTiles);
 
 async function isWordValid(word) {
-  // NOTE: dictionaryapi.dev is not an official Scrabble lexicon
-  const whitelist = ["GI", "QI", "ZA", "JO", "XI", "MI"];
-  if (whitelist.includes(word.toUpperCase())) return true;
+  const normalized = String(word || "").trim().toUpperCase();
+  if (!normalized) return false;
 
-  try {
-    const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word.toLowerCase()}`);
-    return res.ok;
-  } catch {
-    return false;
-  }
+  if (wordValidityCache.has(normalized)) return wordValidityCache.get(normalized);
+
+  await ensureDictionaryLoaded();
+  const ok = dictionarySet ? dictionarySet.has(normalized) : false;
+  wordValidityCache.set(normalized, ok);
+  return ok;
 }
 
 const submitBtn = document.getElementById('submit-word');
 if (submitBtn) submitBtn.addEventListener('click', async () => {
   if (gameOver) return;
+
+  exchangeSelectionMode = false;
+  clearPlacementSelection();
+  clearExchangeSelection();
 
   const newIdxs = newTileIndices();
   if (newIdxs.length === 0) return;
@@ -500,7 +796,8 @@ if (submitBtn) submitBtn.addEventListener('click', async () => {
       return;
     }
   } else {
-    // One tile: compute BOTH possible words, accept if either forms length >= 2
+    // One tile: compute BOTH possible words (horiz + vert).
+    // Your rule: accept the move if at least ONE of them is valid.
     const idx = newIdxs[0];
     const horiz = getWordFrom(idx, 0, 1);
     const vert = getWordFrom(idx, 1, 0);
@@ -514,13 +811,48 @@ if (submitBtn) submitBtn.addEventListener('click', async () => {
       return;
     }
 
-    if (horizOk) {
-      mainDr = 0; mainDc = 1;
-      main = horiz;
-      if (vertOk) extraSingleTileWord = vert;
+    const horizWord = horizOk ? horiz : null;
+    const vertWord = vertOk ? vert : null;
+
+    // Choose a valid main direction (accept if either is valid).
+    const [horizValid, vertValid] = await Promise.all([
+      horizWord ? isWordValid(horizWord.word) : Promise.resolve(false),
+      vertWord ? isWordValid(vertWord.word) : Promise.resolve(false),
+    ]);
+
+    if (!horizValid && !vertValid) {
+      alert("Neither horizontal nor vertical word is valid.");
+      rollbackNewTilesToRack();
+      return;
+    }
+
+    if (horizValid && vertValid) {
+      // Prefer the direction that reuses a board letter so the main line matches standard
+      // "hook/cross" scoring when both words are valid.
+      const lockedBeforePick = getLockedBoardIndices();
+      const hReuse = horizWord.indices.some((i) => lockedBeforePick.has(i));
+      const vReuse = vertWord.indices.some((i) => lockedBeforePick.has(i));
+      if (vReuse && !hReuse) {
+        mainDr = 1;
+        mainDc = 0;
+        main = vertWord;
+        extraSingleTileWord = horizWord;
+      } else {
+        mainDr = 0;
+        mainDc = 1;
+        main = horizWord;
+        extraSingleTileWord = vertWord;
+      }
+    } else if (horizValid) {
+      mainDr = 0;
+      mainDc = 1;
+      main = horizWord;
+      if (vertWord) extraSingleTileWord = vertWord;
     } else {
-      mainDr = 1; mainDc = 0;
-      main = vert;
+      mainDr = 1;
+      mainDc = 0;
+      main = vertWord;
+      if (horizWord) extraSingleTileWord = horizWord;
     }
   }
 
@@ -554,21 +886,54 @@ if (submitBtn) submitBtn.addEventListener('click', async () => {
     if (w.word.length >= 2) wordsFormed.push(w);
   }
 
-  // Validate all words
-  const ok = await isWordValid(main.word);
-if (!ok) {
-  alert(`"${main.word}" is invalid!`);
-  rollbackNewTilesToRack();
-  return;
-}
-
-  // Score all words (no duplicates)
-  let turnScore = 0;
-  const seen = new Set();
+  // Custom rule:
+  // - The main word must be valid.
+  // - Cross words (perpendicular words formed this turn) are only scored if valid.
+  // - The move is still accepted even if some cross words are invalid.
+  const uniqueWords = [];
+  const seenWordIndices = new Set();
   for (const w of wordsFormed) {
     const key = w.indices.join(",");
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (seenWordIndices.has(key)) continue;
+    seenWordIndices.add(key);
+    uniqueWords.push(w);
+  }
+
+  // After the first move: the main play line (and for one tile, the alternate full word) must
+  // include at least one locked square. Perpendicular hooks alone are not enough — that blocks
+  // parallel words that only sit beside existing letters without sharing a cell.
+  if (!firstMove) {
+    const lockedBefore = getLockedBoardIndices();
+    const mainUsesBoard = main.indices.some((idx) => lockedBefore.has(idx));
+    const extraUsesBoard =
+      extraSingleTileWord &&
+      extraSingleTileWord.indices.some((idx) => lockedBefore.has(idx));
+    if (!mainUsesBoard && !extraUsesBoard) {
+      alert(
+        "Your play must cross an existing word—use at least one letter already on the board along your main line (a parallel word that only touches the sides is not allowed)."
+      );
+      rollbackNewTilesToRack();
+      return;
+    }
+  }
+
+  let turnScore = 0;
+  const mainKey = main.indices.join(",");
+
+  // Main word must be valid
+  const mainOk = await isWordValid(main.word);
+  if (!mainOk) {
+    alert(`"${main.word}" is invalid!`);
+    rollbackNewTilesToRack();
+    return;
+  }
+
+  // Always score main; score cross words only if dictionary says they're valid
+  turnScore += scoreWord(main.indices);
+  for (const w of uniqueWords) {
+    if (w.indices.join(",") === mainKey) continue;
+    const ok = await isWordValid(w.word);
+    if (!ok) continue;
     turnScore += scoreWord(w.indices);
   }
 
@@ -580,12 +945,20 @@ if (!ok) {
   // scoring move resets scoreless counter
   consecutiveScorelessTurns = 0;
 
-  const history = document.getElementById('history-list');
-  if (history) {
-    const li = document.createElement('li');
-    li.classList.add("history-item");
-    li.innerHTML = `<span class="history-word">P${currentPlayer}: ${main.word}</span><span class="history-points">+${turnScore}</span>`;
-    history.prepend(li);
+  const tbody = document.getElementById(`history-tbody-${currentPlayer}`);
+  if (tbody) {
+    const tr = document.createElement("tr");
+    tr.classList.add("history-row");
+
+    const isBingo = newIdxs.length === 7;
+    if (isBingo) tr.classList.add("history-bingo");
+
+    tr.innerHTML = `
+      <td class="history-word-cell">${main.word}</td>
+      <td class="history-points-cell">+${turnScore}</td>
+    `;
+
+    tbody.prepend(tr);
   }
 
   // Lock placed tiles

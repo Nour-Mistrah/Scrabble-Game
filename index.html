@@ -25,13 +25,29 @@
         <div id="game-stage">
             <div id="board-container">
                 <div id="player-turn-indicator">Waiting...</div>
-                <div id="scrabble-board"></div>
-                
-                <div class="main-actions">
-                    <button id="submit-word">Submit Word</button>
-                    <button id="exchange-tiles">Exchange Tiles</button>
-                    <button id="reset-board">Reset</button>
-                    <button id="pass-turn">Pass</button>
+                <div class="board-and-actions">
+                    <div id="scrabble-board"></div>
+
+                    <div class="side-actions">
+                        <div class="main-actions">
+                            <button id="submit-word">Submit Word</button>
+                            <button id="exchange-tiles">Exchange Tiles</button>
+                            <button id="pass-turn">Pass</button>
+                            <button id="reset-board">Reset</button>
+                        </div>
+
+                        <div class="scores-row">
+                            <button id="scores">Scores</button>
+                        </div>
+
+                        <div class="tile-bag-panel" aria-label="Tiles remaining in bag">
+                            <div class="tile-bag-header">
+                                <span class="tile-bag-title">Bag</span>
+                                <span class="tile-bag-total-wrap"><span id="tile-bag-total">0</span> left</span>
+                            </div>
+                            <div id="tile-bag-display" class="tile-bag-grid"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -41,9 +57,28 @@
             <div id="player-area-4" class="player-side pos-bottom"></div>
         </div>
 
-        <div id="move-history">
-            <h3>History</h3>
-            <ul id="history-list"></ul>
+        <div id="scores-modal" class="scores-modal" style="display: none;">
+            <div class="scores-modal-card">
+                <div class="scores-modal-header">
+                    <h3>Scores</h3>
+                    <button id="close-scores" class="scores-close" type="button">Close</button>
+                </div>
+
+                <table class="scores-table">
+                    <thead>
+                        <tr>
+                            <th>Player</th>
+                            <th>Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scores-tbody"></tbody>
+                </table>
+
+                <div class="scores-modal-history">
+                    <h4>History</h4>
+                    <div id="history-tables"></div>
+                </div>
+            </div>
         </div>
     </div>
 
