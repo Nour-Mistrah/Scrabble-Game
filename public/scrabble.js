@@ -4,10 +4,20 @@ let numPlayers = 1;
 let currentPlayer = 1;
 let playerScores = [];
 let playerRacks = [];
+let playerNames = [];
 
 let consecutiveScorelessTurns = 0;
 const MAX_SCORELESS_TURNS = 6;
 let gameOver = false;
+
+let playMode = 'local'; // 'local' | 'online'
+let authToken = localStorage.getItem('scrabble_token') || '';
+let authUsername = localStorage.getItem('scrabble_username') || '';
+let authUserId = parseInt(localStorage.getItem('scrabble_userId') || '0', 10) || null;
+let socket = null;
+let onlineRoomId = '';
+let yourPlayerIndex = 0;
+let onlinePlayerLabels = [];
 
 // History UI (one table per player)
 let playerHistoryTBodies = [];
@@ -43,47 +53,393 @@ const letterValues = {
   '?': 0
 };
 
-// Memoize dictionary lookups (dictionary is static, but lookups are frequent).
-const wordValidityCache = new Map(); // key: UPPERCASE word, value: boolean
+const wordValidityCache = new Map();
 
-let dictionarySet = null; // Set<string> of valid words loaded from dictionary.txt
-let dictionaryLoadPromise = null;
-let dictionaryLoadErrorShown = false;
-
-async function ensureDictionaryLoaded() {
-  if (dictionarySet) return;
-  if (dictionaryLoadPromise) return dictionaryLoadPromise;
-
-  dictionaryLoadPromise = (async () => {
-    try {
-      const res = await fetch("./dictionary.txt");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-
-      // dictionary.txt is expected to be "one word per line", uppercase A-Z.
-      const words = text
-        .split(/\r?\n/)
-        .map(l => l.trim())
-        .filter(Boolean)
-        .map(w => w.toUpperCase());
-
-      dictionarySet = new Set(words);
-    } catch (e) {
-      // If the dictionary can't be loaded (common when opening via file://),
-      // fall back to an empty set so all words are rejected instead of crashing.
-      dictionarySet = new Set();
-      if (!dictionaryLoadErrorShown) {
-        dictionaryLoadErrorShown = true;
-        alert(
-          "Could not load dictionary.txt.\n" +
-          "Please run the app from a local server (http://...) so fetch() can access dictionary.txt."
-        );
-      }
-    }
-  })();
-
-  return dictionaryLoadPromise;
+function authHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (authToken) h.Authorization = `Bearer ${authToken}`;
+  return h;
 }
+
+async function isWordValid(word) {
+  const normalized = String(word || '').trim().toUpperCase();
+  if (!normalized) return false;
+  if (wordValidityCache.has(normalized)) return wordValidityCache.get(normalized);
+
+  try {
+    const res = await fetch('/api/dictionary/check', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ word: normalized }),
+    });
+    if (res.status === 401) {
+      handleAuthExpired();
+      return false;
+    }
+    if (!res.ok) return false;
+    const data = await res.json();
+    const ok = Boolean(data.valid);
+    wordValidityCache.set(normalized, ok);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function handleAuthExpired() {
+  authToken = '';
+  localStorage.removeItem('scrabble_token');
+  alert('Session expired. Please log in again.');
+  showAuthOverlay();
+}
+
+function hideAllOverlays() {
+  ['auth-overlay', 'menu-overlay', 'lobby-overlay', 'setup-overlay'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+}
+
+function showAuthOverlay() {
+  hideAllOverlays();
+  document.getElementById('game-container').style.display = 'none';
+  document.getElementById('auth-overlay').style.display = 'flex';
+}
+
+function showMenuOverlay() {
+  hideAllOverlays();
+  document.getElementById('menu-username').textContent = authUsername;
+  document.getElementById('menu-overlay').style.display = 'flex';
+}
+
+function ensureSocket() {
+  if (socket?.connected) return socket;
+  socket = io({ auth: { token: authToken } });
+  socket.on('connect_error', (err) => {
+    console.error(err.message);
+  });
+  socket.on('lobbyUpdate', (data) => {
+    if (data.roomId !== onlineRoomId) return;
+    renderLobby(data);
+  });
+  socket.on('gameState', (state) => {
+    if (state.roomId !== onlineRoomId) return;
+    applyOnlineGameState(state);
+  });
+  socket.on('gameStarted', () => {
+    document.getElementById('lobby-overlay').style.display = 'none';
+    enterOnlineGameUI();
+  });
+  socket.on('gameOver', (payload) => {
+    if (payload?.message) {
+      const scores = onlinePlayerLabels
+        .map((name, i) => `${name}: ${playerScores[i] ?? 0}`)
+        .join('\n');
+      alert(`${payload.message}\n\nFinal scores:\n${scores}`);
+    }
+  });
+  return socket;
+}
+
+function renderLobby(data) {
+  const list = document.getElementById('lobby-players');
+  const startBtn = document.getElementById('btn-start-online');
+  if (!list) return;
+  list.innerHTML = data.players
+    .map((p) => `<li>${p.username}${p.userId === data.hostUserId ? ' (host)' : ''}</li>`)
+    .join('');
+  const isHost = data.hostUserId === authUserId;
+  if (startBtn) {
+    startBtn.disabled = !isHost || data.players.length < 2;
+    startBtn.textContent =
+      data.players.length < 2 ? 'Waiting for players…' : 'Start game (2+ players)';
+  }
+}
+
+function enterOnlineGameUI() {
+  playMode = 'online';
+  document.getElementById('game-container').style.display = 'block';
+  const bar = document.getElementById('online-bar');
+  if (bar) {
+    bar.hidden = false;
+    document.getElementById('online-room-label').textContent = `Room ${onlineRoomId}`;
+    document.getElementById('online-you-label').textContent = `Playing as ${authUsername}`;
+  }
+  createBoard();
+}
+
+function applyOnlineGameState(state) {
+  playMode = 'online';
+  gameOver = state.gameOver;
+  yourPlayerIndex = state.yourPlayerIndex;
+  numPlayers = state.players.length;
+  currentPlayer = state.currentPlayerIndex + 1;
+  consecutiveScorelessTurns = state.consecutiveScorelessTurns;
+
+  onlinePlayerLabels = state.players.map((p) => p.username);
+  playerNames = [...onlinePlayerLabels];
+  playerScores = state.players.map((p) => p.score);
+
+  playerRacks = state.players.map((p, i) => {
+    if (p.isYou) return [...state.yourRack];
+    return Array(p.rackCount).fill('•');
+  });
+
+  tileBag = [];
+  for (const [letter, count] of Object.entries(state.tileBagCounts || {})) {
+    for (let i = 0; i < count; i++) tileBag.push(letter);
+  }
+
+  if (!document.getElementById('game-container') || document.getElementById('game-container').style.display === 'none') {
+    enterOnlineGameUI();
+  }
+
+  document.querySelectorAll('.player-side').forEach((el) => (el.style.display = 'none'));
+  const positions = ['pos-left', 'pos-right', 'pos-top', 'pos-bottom'];
+  for (let i = 0; i < numPlayers; i++) {
+    const area = document.getElementById(`player-area-${i + 1}`);
+    if (area) {
+      area.style.display = 'flex';
+      setupPlayerArea(i + 1, state.players[i].username, state.players[i].isYou);
+    }
+  }
+
+  syncBoardFromServer(state.board, state.pendingPlacements);
+  initHistoryTablesFromOnline(state.history);
+  updateTurnUI();
+  renderAllRacks();
+  updateOnlineActionButtons(state);
+}
+
+function syncBoardFromServer(boardCells, pending) {
+  if (!board) return;
+  if (!board.children.length) createBoard();
+
+  for (let i = 0; i < 225; i++) {
+    const sq = getSquare(i);
+    const cell = boardCells[i];
+    const pendingHere = pending?.find((p) => p.idx === i);
+
+    sq.classList.remove('tile-placed', 'locked');
+    sq.dataset.isBlank = 'false';
+    delete sq.dataset.score;
+    sq.onclick = null;
+
+    if (!cell && !pendingHere) {
+      if (sq.classList.contains('star')) sq.innerText = '★';
+      else if (sq.classList.contains('tw')) sq.innerText = 'TW';
+      else if (sq.classList.contains('dw')) sq.innerText = 'DW';
+      else if (sq.classList.contains('tl')) sq.innerText = 'TL';
+      else if (sq.classList.contains('dl')) sq.innerText = 'DL';
+      else sq.innerText = '';
+      continue;
+    }
+
+    const src = pendingHere || cell;
+    sq.innerText = src.display;
+    sq.dataset.isBlank = src.isBlank ? 'true' : 'false';
+    sq.classList.add('tile-placed');
+    sq.dataset.score = letterValues[src.isBlank ? '?' : src.display.toUpperCase()] ?? 0;
+    if (cell?.locked) sq.classList.add('locked');
+    else if (pendingHere && isYourTurnOnline()) {
+      sq.onclick = () => {
+        ensureSocket().emit('removeTile', i, (res) => {
+          if (res?.error) alert(res.error);
+        });
+      };
+    }
+  }
+}
+
+function isYourTurnOnline() {
+  return playMode === 'online' && yourPlayerIndex === currentPlayer - 1 && !gameOver;
+}
+
+function initHistoryTablesFromOnline(history) {
+  const container = document.getElementById('history-tables');
+  if (!container) return;
+  container.innerHTML = '';
+  playerHistoryTBodies = [];
+  history.forEach((block, i) => {
+    const table = document.createElement('table');
+    table.classList.add('player-history-table');
+    table.innerHTML = `
+      <thead><tr><th colspan="2">${block.username} History</th></tr></thead>
+      <tbody id="history-tbody-${i + 1}"></tbody>`;
+    container.appendChild(table);
+    const tbody = table.querySelector('tbody');
+    playerHistoryTBodies[i] = tbody;
+    block.entries.forEach((entry) => {
+      const tr = document.createElement('tr');
+      tr.className = entry.bingo ? 'history-row history-bingo' : 'history-row';
+      tr.innerHTML = `<td class="history-word-cell">${entry.word}</td><td class="history-points-cell">+${entry.points}</td>`;
+      tbody.appendChild(tr);
+    });
+  });
+}
+
+function updateOnlineActionButtons(state) {
+  const canAct = state.yourPlayerIndex === state.currentPlayerIndex && !state.gameOver;
+  const submitBtn = document.getElementById('submit-word');
+  const exchangeBtn = document.getElementById('exchange-tiles');
+  const passBtn = document.getElementById('pass-turn');
+  if (submitBtn) submitBtn.disabled = !canAct;
+  if (exchangeBtn) exchangeBtn.disabled = !canAct;
+  if (passBtn) passBtn.disabled = !canAct;
+}
+
+function initAuthUI() {
+  let authMode = 'login';
+  const tabLogin = document.getElementById('tab-login');
+  const tabRegister = document.getElementById('tab-register');
+  const form = document.getElementById('auth-form');
+  const submitBtn = document.getElementById('auth-submit');
+  const errEl = document.getElementById('auth-error');
+
+  function setMode(mode) {
+    authMode = mode;
+    tabLogin.classList.toggle('auth-tab--active', mode === 'login');
+    tabRegister.classList.toggle('auth-tab--active', mode === 'register');
+    submitBtn.textContent = mode === 'login' ? 'Log in' : 'Create account';
+    errEl.hidden = true;
+  }
+
+  tabLogin?.addEventListener('click', () => setMode('login'));
+  tabRegister?.addEventListener('click', () => setMode('register'));
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.hidden = true;
+    const username = document.getElementById('auth-username').value.trim();
+    const password = document.getElementById('auth-password').value;
+    try {
+      if (authMode === 'register') {
+        const reg = await fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        const regData = await reg.json();
+        if (!reg.ok) {
+          errEl.textContent = regData.error || 'Registration failed';
+          errEl.hidden = false;
+          return;
+        }
+      }
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errEl.textContent = data.error || 'Authentication failed';
+        errEl.hidden = false;
+        return;
+      }
+      authToken = data.token;
+      authUsername = data.username;
+      authUserId = data.userId;
+      localStorage.setItem('scrabble_token', authToken);
+      localStorage.setItem('scrabble_username', authUsername);
+      localStorage.setItem('scrabble_userId', String(authUserId));
+      showMenuOverlay();
+    } catch {
+      errEl.textContent = 'Could not reach server. Run npm start and open http://localhost:5000';
+      errEl.hidden = false;
+    }
+  });
+
+  document.getElementById('btn-logout')?.addEventListener('click', () => {
+    authToken = '';
+    authUsername = '';
+    authUserId = null;
+    localStorage.removeItem('scrabble_token');
+    localStorage.removeItem('scrabble_username');
+    localStorage.removeItem('scrabble_userId');
+    socket?.disconnect();
+    socket = null;
+    showAuthOverlay();
+  });
+
+  document.getElementById('btn-local-game')?.addEventListener('click', () => {
+    hideAllOverlays();
+    document.getElementById('setup-overlay').style.display = 'flex';
+  });
+
+  document.getElementById('btn-back-menu')?.addEventListener('click', showMenuOverlay);
+
+  document.getElementById('btn-show-join')?.addEventListener('click', () => {
+    const panel = document.getElementById('join-panel');
+    panel.hidden = !panel.hidden;
+  });
+
+  document.getElementById('btn-create-room')?.addEventListener('click', () => {
+    const err = document.getElementById('menu-error');
+    err.hidden = true;
+    ensureSocket().emit('createRoom', (res) => {
+      if (res?.error) {
+        err.textContent = res.error;
+        err.hidden = false;
+        return;
+      }
+      onlineRoomId = res.roomId;
+      document.getElementById('lobby-room-code').textContent = onlineRoomId;
+      hideAllOverlays();
+      document.getElementById('lobby-overlay').style.display = 'flex';
+    });
+  });
+
+  document.getElementById('btn-join-room')?.addEventListener('click', () => {
+    const err = document.getElementById('menu-error');
+    err.hidden = true;
+    const code = document.getElementById('join-room-code').value.trim().toUpperCase();
+    if (!code) return;
+    ensureSocket().emit('joinRoom', code, (res) => {
+      if (res?.error) {
+        err.textContent = res.error;
+        err.hidden = false;
+        return;
+      }
+      onlineRoomId = res.roomId;
+      document.getElementById('lobby-room-code').textContent = onlineRoomId;
+      hideAllOverlays();
+      document.getElementById('lobby-overlay').style.display = 'flex';
+    });
+  });
+
+  document.getElementById('btn-leave-lobby')?.addEventListener('click', () => {
+    ensureSocket().emit('leaveRoom');
+    onlineRoomId = '';
+    showMenuOverlay();
+  });
+
+  document.getElementById('btn-start-online')?.addEventListener('click', () => {
+    const err = document.getElementById('lobby-error');
+    err.hidden = true;
+    ensureSocket().emit('startGame', (res) => {
+      if (res?.error) {
+        err.textContent = res.error;
+        err.hidden = false;
+      }
+    });
+  });
+
+  if (authToken) {
+    fetch('/api/me', { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((u) => {
+        authUsername = u.username;
+        authUserId = u.userId;
+        showMenuOverlay();
+      })
+      .catch(showAuthOverlay);
+  } else {
+    showAuthOverlay();
+  }
+}
+
+document.addEventListener('DOMContentLoaded', initAuthUI);
 
 const tw = [0, 7, 14, 105, 119, 210, 217, 224];
 const dw = [16, 28, 32, 42, 48, 56, 64, 70, 154, 160, 168, 176, 182, 192, 196, 208];
@@ -100,6 +456,13 @@ const inBounds = (r, c) => r >= 0 && r < 15 && c >= 0 && c < 15;
 // --- Endgame + turn helpers ---
 function endTurnNoScore(reason = "pass") {
   if (gameOver) return;
+
+  if (playMode === 'online') {
+    ensureSocket().emit('passTurn', (res) => {
+      if (res?.error) alert(res.error);
+    });
+    return;
+  }
 
   exchangeSelectionMode = false;
   clearPlacementSelection();
@@ -126,12 +489,16 @@ const scoresModal = document.getElementById('scores-modal');
 const closeScoresBtn = document.getElementById('close-scores');
 const scoresTbody = document.getElementById('scores-tbody');
 
+function playerDisplayName(i) {
+  return playerNames[i] || `Player ${i + 1}`;
+}
+
 function renderScoresTable() {
   if (!scoresTbody) return;
   scoresTbody.innerHTML = "";
   for (let i = 0; i < numPlayers; i++) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>Player ${i + 1}</td><td>${playerScores[i]}</td>`;
+    tr.innerHTML = `<td>${playerDisplayName(i)}</td><td>${playerScores[i]}</td>`;
     scoresTbody.appendChild(tr);
   }
 }
@@ -315,6 +682,9 @@ function rollbackNewTilesToRack() {
 
 // --- 2. Initialization & Setup ---
 window.startGame = function (count) {
+  playMode = 'local';
+  document.getElementById('online-bar').hidden = true;
+  playerNames = [];
   numPlayers = parseInt(count, 10);
   currentPlayer = 1;
   playerScores = new Array(numPlayers).fill(0);
@@ -376,12 +746,14 @@ function initHistoryTables() {
   }
 }
 
-function setupPlayerArea(pNum) {
+function setupPlayerArea(pNum, displayName, isYou) {
   const area = document.getElementById(`player-area-${pNum}`);
   if (!area) return;
+  const name = displayName || `Player ${pNum}`;
+  const youBadge = isYou ? '<span class="you-badge">You</span>' : '';
   area.innerHTML = `
     <div class="player-card">
-      <h4>Player ${pNum}</h4>
+      <h4>${name}${youBadge}</h4>
       <div class="score-display" id="score-${pNum}">0</div>
       <div class="turn-badge">Your Turn</div>
       <div id="rack-${pNum}" class="rack-grid"></div>
@@ -459,14 +831,22 @@ function renderAllRacks() {
     const playerArea = document.getElementById(`player-area-${i + 1}`);
     if (playerArea) playerArea.classList.toggle('active-turn', isCurrent);
 
+    const isOnlineOther = playMode === 'online' && i !== yourPlayerIndex;
+
     playerRacks[i].forEach((letter, index) => {
       const tile = document.createElement('div');
       tile.classList.add('tile');
 
-      tile.innerText = letter;
-      tile.dataset.score = letterValues[letter] ?? 0;
+      const showLetter = isOnlineOther ? '?' : letter;
+      tile.innerText = showLetter;
+      tile.dataset.score = isOnlineOther ? '' : (letterValues[letter] ?? 0);
+      if (isOnlineOther) tile.classList.add('rack-placeholder');
 
-      if (isCurrent && !gameOver) {
+      const canInteract =
+        isCurrent && !gameOver &&
+        (playMode === 'local' || (playMode === 'online' && i === yourPlayerIndex));
+
+      if (canInteract) {
         tile.dataset.index = index;
 
         const touch = isTouchDevice();
@@ -523,7 +903,11 @@ function renderAllRacks() {
 
 function updateTurnUI() {
   const indicator = document.getElementById('player-turn-indicator');
-  if (indicator) indicator.innerText = `Player ${currentPlayer}'s Turn`;
+  if (indicator) {
+    const name = playerDisplayName(currentPlayer - 1);
+    const suffix = playMode === 'online' && yourPlayerIndex === currentPlayer - 1 ? ' (You)' : '';
+    indicator.innerText = `${name}'s Turn${suffix}`;
+  }
 
   for (let i = 0; i < numPlayers; i++) {
     const s = document.getElementById(`score-${i + 1}`);
@@ -542,6 +926,7 @@ function setupDropZones() {
     square.addEventListener('drop', (e) => {
       e.preventDefault();
       if (gameOver) return;
+      if (playMode === 'online' && !isYourTurnOnline()) return;
 
       let letter = e.dataTransfer.getData('text/plain');
       const sourceIndex = parseInt(e.dataTransfer.getData('source-index'), 10);
@@ -561,10 +946,19 @@ function setupDropZones() {
 
       if (square.classList.contains('tile-placed')) return alert("Occupied!");
 
+      if (playMode === 'online') {
+        ensureSocket().emit(
+          'placeTile',
+          { idx: targetIdx, rackIndex: sourceIndex, blankAs },
+          (res) => { if (res?.error) alert(res.error); }
+        );
+        if (draggingTile) draggingTile.remove();
+        return;
+      }
+
       const boardHasAnyTiles = document.querySelectorAll('.tile-placed').length > 0;
       if (!boardHasAnyTiles && targetIdx !== 112) return alert("Start on the star!");
 
-      // Simple straight-line enforcement while placing (submit validates full rules)
       const currentTurnSquares = Array.from(document.querySelectorAll('.tile-placed:not(.locked)'));
       if (currentTurnSquares.length > 0) {
         const firstIdx = allSquares.indexOf(currentTurnSquares[0]);
@@ -582,17 +976,14 @@ function setupDropZones() {
         }
       }
 
-      // Place on board
       square.innerText = (letter === '?' ? blankAs : letter);
       square.dataset.isBlank = (letter === '?' ? "true" : "false");
       square.classList.add('tile-placed');
       square.dataset.score = letterValues[letter] ?? 0;
 
-      // remove from rack
       playerRacks[currentPlayer - 1].splice(sourceIndex, 1);
       if (draggingTile) draggingTile.remove();
 
-      // click to return tile (only if not locked)
       square.onclick = () => {
         if (square.classList.contains('locked') || gameOver) return;
 
@@ -618,6 +1009,7 @@ function setupDropZones() {
       if (square.classList.contains('tile-placed')) return; // occupied (tap-to-return is handled after placement)
       if (!tileForPlacement) return;
       if (tileForPlacement.playerIdx !== currentPlayer - 1) return;
+      if (playMode === 'online' && !isYourTurnOnline()) return;
 
       let letter = tileForPlacement.letter;
       const sourceIndex = tileForPlacement.rackIndex;
@@ -633,10 +1025,19 @@ function setupDropZones() {
         }
       }
 
+      if (playMode === 'online') {
+        ensureSocket().emit(
+          'placeTile',
+          { idx: targetIdx, rackIndex: sourceIndex, blankAs },
+          (res) => { if (res?.error) alert(res.error); }
+        );
+        clearPlacementSelection();
+        return;
+      }
+
       const boardHasAnyTiles = document.querySelectorAll('.tile-placed').length > 0;
       if (!boardHasAnyTiles && targetIdx !== 112) return alert("Start on the star!");
 
-      // Simple straight-line enforcement while placing
       const currentTurnSquares = Array.from(document.querySelectorAll('.tile-placed:not(.locked)'));
       if (currentTurnSquares.length > 0) {
         const firstIdx = allSquares.indexOf(currentTurnSquares[0]);
@@ -654,17 +1055,14 @@ function setupDropZones() {
         }
       }
 
-      // Place on board
       square.innerText = (letter === '?' ? blankAs : letter);
       square.dataset.isBlank = (letter === '?' ? "true" : "false");
       square.classList.add('tile-placed');
       square.dataset.score = letterValues[letter] ?? 0;
 
-      // remove from rack
       playerRacks[currentPlayer - 1].splice(sourceIndex, 1);
       clearPlacementSelection();
 
-      // click to return tile (only if not locked)
       square.onclick = () => {
         if (square.classList.contains('locked') || gameOver) return;
 
@@ -688,6 +1086,8 @@ function setupDropZones() {
 // --- 5. Handlers ---
 async function exchangeSelectedTiles() {
   if (gameOver) return;
+  if (playMode === 'online' && !isYourTurnOnline()) return;
+
   const touch = isTouchDevice();
   const selected = document.querySelectorAll('.selected-for-exchange');
 
@@ -717,7 +1117,18 @@ async function exchangeSelectedTiles() {
 
   if (!confirm(`Exchange ${selected.length} tiles and skip turn?`)) return;
 
-  const indices = Array.from(selected).map(t => parseInt(t.dataset.index, 10)).sort((a, b) => b - a);
+  const indices = Array.from(selected).map(t => parseInt(t.dataset.index, 10)).sort((a, b) => a - b);
+
+  if (playMode === 'online') {
+    exchangeSelectionMode = false;
+    clearExchangeSelection();
+    ensureSocket().emit('exchangeTiles', indices, (res) => {
+      if (res?.error) alert(res.error);
+    });
+    return;
+  }
+
+  indices.sort((a, b) => b - a);
   indices.forEach(idx => {
     const removed = playerRacks[currentPlayer - 1].splice(idx, 1)[0];
     tileBag.push(removed);
@@ -741,21 +1152,16 @@ async function exchangeSelectedTiles() {
 const exchangeBtn = document.getElementById('exchange-tiles');
 if (exchangeBtn) exchangeBtn.addEventListener('click', exchangeSelectedTiles);
 
-async function isWordValid(word) {
-  const normalized = String(word || "").trim().toUpperCase();
-  if (!normalized) return false;
-
-  if (wordValidityCache.has(normalized)) return wordValidityCache.get(normalized);
-
-  await ensureDictionaryLoaded();
-  const ok = dictionarySet ? dictionarySet.has(normalized) : false;
-  wordValidityCache.set(normalized, ok);
-  return ok;
-}
-
 const submitBtn = document.getElementById('submit-word');
 if (submitBtn) submitBtn.addEventListener('click', async () => {
   if (gameOver) return;
+  if (playMode === 'online') {
+    if (!isYourTurnOnline()) return;
+    ensureSocket().emit('submitWord', (res) => {
+      if (res?.error) alert(res.error);
+    });
+    return;
+  }
 
   exchangeSelectionMode = false;
   clearPlacementSelection();
@@ -982,4 +1388,10 @@ if (submitBtn) submitBtn.addEventListener('click', async () => {
 });
 
 const resetBtn = document.getElementById('reset-board');
-if (resetBtn) resetBtn.addEventListener('click', () => location.reload());
+if (resetBtn) resetBtn.addEventListener('click', () => {
+  if (playMode === 'online') {
+    if (confirm('Leave this online game?')) location.reload();
+    return;
+  }
+  location.reload();
+});

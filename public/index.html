@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scrabble Game</title>
+    <link rel="stylesheet" href="scrabble.css">
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="scrabble.js" defer></script>
+</head>
+<body>
+    <div id="auth-overlay" class="setup-overlay">
+        <div class="setup-card auth-card">
+            <h1>Scrabble</h1>
+            <p class="auth-subtitle">Sign in to play online with friends</p>
+            <div class="auth-tabs">
+                <button type="button" id="tab-login" class="auth-tab auth-tab--active">Log in</button>
+                <button type="button" id="tab-register" class="auth-tab">Sign up</button>
+            </div>
+            <form id="auth-form" class="auth-form">
+                <label>
+                    Username
+                    <input type="text" id="auth-username" autocomplete="username" required minlength="3" maxlength="50">
+                </label>
+                <label>
+                    Password
+                    <input type="password" id="auth-password" autocomplete="current-password" required minlength="6">
+                </label>
+                <p id="auth-error" class="auth-error" hidden></p>
+                <button type="submit" id="auth-submit" class="auth-primary">Log in</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="menu-overlay" class="setup-overlay" style="display: none;">
+        <div class="setup-card menu-card">
+            <h1>Welcome, <span id="menu-username"></span></h1>
+            <p>Choose how you want to play</p>
+            <div class="menu-actions">
+                <button type="button" id="btn-create-room" class="menu-btn">Create online game</button>
+                <button type="button" id="btn-show-join" class="menu-btn menu-btn--secondary">Join with room code</button>
+                <button type="button" id="btn-local-game" class="menu-btn menu-btn--outline">Local game (same device)</button>
+            </div>
+            <div id="join-panel" class="join-panel" hidden>
+                <input type="text" id="join-room-code" placeholder="Room code" maxlength="6" autocapitalize="characters">
+                <button type="button" id="btn-join-room" class="menu-btn">Join</button>
+            </div>
+            <p id="menu-error" class="auth-error" hidden></p>
+            <button type="button" id="btn-logout" class="text-btn">Log out</button>
+        </div>
+    </div>
+
+    <div id="lobby-overlay" class="setup-overlay" style="display: none;">
+        <div class="setup-card lobby-card">
+            <h1>Game lobby</h1>
+            <p>Room code: <strong id="lobby-room-code" class="room-code"></strong></p>
+            <p class="lobby-hint">Share this code so friends can join from their laptops.</p>
+            <ul id="lobby-players" class="lobby-list"></ul>
+            <div class="lobby-actions">
+                <button type="button" id="btn-start-online" class="menu-btn" disabled>Start game (2+ players)</button>
+                <button type="button" id="btn-leave-lobby" class="menu-btn menu-btn--outline">Leave</button>
+            </div>
+            <p id="lobby-error" class="auth-error" hidden></p>
+        </div>
+    </div>
+
+    <div id="setup-overlay" class="setup-overlay" style="display: none;">
+        <div class="setup-card">
+            <h1>Local Scrabble</h1>
+            <p>Select number of players on this device:</p>
+            <div class="player-buttons">
+                <button type="button" onclick="startGame(1)">1 Player</button>
+                <button type="button" onclick="startGame(2)">2 Players</button>
+                <button type="button" onclick="startGame(3)">3 Players</button>
+                <button type="button" onclick="startGame(4)">4 Players</button>
+            </div>
+            <button type="button" id="btn-back-menu" class="text-btn">Back to menu</button>
+        </div>
+    </div>
+
+    <div id="game-container" style="display: none;">
+        <div id="online-bar" class="online-bar" hidden>
+            <span id="online-room-label"></span>
+            <span id="online-you-label"></span>
+        </div>
+        <div id="game-stage">
+            <div id="board-container">
+                <div id="player-turn-indicator">Waiting...</div>
+                <div class="board-and-actions">
+                    <div id="scrabble-board"></div>
+
+                    <div class="side-actions">
+                        <div class="main-actions">
+                            <button id="submit-word">Submit Word</button>
+                            <button id="exchange-tiles">Exchange Tiles</button>
+                            <button id="pass-turn">Pass</button>
+                            <button id="reset-board">Reset</button>
+                        </div>
+
+                        <div class="scores-row">
+                            <button id="scores">Scores</button>
+                        </div>
+
+                        <div class="tile-bag-panel" aria-label="Tiles remaining in bag">
+                            <div class="tile-bag-header">
+                                <span class="tile-bag-title">Bag</span>
+                                <span class="tile-bag-total-wrap"><span id="tile-bag-total">0</span> left</span>
+                            </div>
+                            <div id="tile-bag-display" class="tile-bag-grid"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="player-area-1" class="player-side pos-left"></div>
+            <div id="player-area-2" class="player-side pos-right"></div>
+            <div id="player-area-3" class="player-side pos-top"></div>
+            <div id="player-area-4" class="player-side pos-bottom"></div>
+        </div>
+
+        <div id="scores-modal" class="scores-modal" style="display: none;">
+            <div class="scores-modal-card">
+                <div class="scores-modal-header">
+                    <h3>Scores</h3>
+                    <button id="close-scores" class="scores-close" type="button">Close</button>
+                </div>
+
+                <table class="scores-table">
+                    <thead>
+                        <tr>
+                            <th>Player</th>
+                            <th>Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scores-tbody"></tbody>
+                </table>
+
+                <div class="scores-modal-history">
+                    <h4>History</h4>
+                    <div id="history-tables"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

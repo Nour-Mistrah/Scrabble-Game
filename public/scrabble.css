@@ -356,6 +356,178 @@ body {
     font-weight: bold;
 }
 
+.setup-overlay {
+    background: rgba(15, 23, 42, 0.72);
+    backdrop-filter: blur(4px);
+}
+
+.auth-card, .menu-card, .lobby-card {
+    min-width: min(92vw, 380px);
+    text-align: left;
+}
+
+.auth-subtitle {
+    color: #64748b;
+    margin-top: -8px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.auth-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.auth-tab {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.auth-tab--active {
+    background: #2e7d32;
+    color: white;
+    border-color: #2e7d32;
+}
+
+.auth-form label {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 14px;
+    color: #334155;
+}
+
+.auth-form input {
+    display: block;
+    width: 100%;
+    margin-top: 6px;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 1rem;
+    box-sizing: border-box;
+}
+
+.auth-primary, .menu-btn {
+    width: 100%;
+    padding: 12px 16px;
+    margin-top: 8px;
+    cursor: pointer;
+    background: #2e7d32;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 1rem;
+}
+
+.menu-btn--secondary {
+    background: #1565c0;
+}
+
+.menu-btn--outline {
+    background: white;
+    color: #2e7d32;
+    border: 2px solid #2e7d32;
+}
+
+.menu-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.join-panel {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.join-panel input {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+}
+
+.auth-error {
+    color: #b91c1c;
+    font-size: 0.9rem;
+    margin: 8px 0 0;
+}
+
+.text-btn {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    margin-top: 16px;
+    text-decoration: underline;
+    width: 100%;
+}
+
+.room-code {
+    font-family: ui-monospace, monospace;
+    font-size: 1.4rem;
+    letter-spacing: 0.12em;
+    color: #1565c0;
+}
+
+.lobby-list {
+    list-style: none;
+    padding: 0;
+    margin: 16px 0;
+    text-align: left;
+}
+
+.lobby-list li {
+    padding: 10px 12px;
+    background: #f1f5f9;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.lobby-hint {
+    color: #64748b;
+    font-size: 0.9rem;
+}
+
+.online-bar {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    padding: 10px 16px;
+    font-weight: 600;
+    color: #334155;
+    background: rgba(255, 255, 255, 0.85);
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.player-card h4 .you-badge {
+    font-size: 0.75rem;
+    background: #1565c0;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.rack-placeholder {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
 #player-turn-indicator {
     font-size: 20px;
     font-weight: bold;
