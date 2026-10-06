@@ -3377,8 +3377,7 @@ if (resetBtn) {
 // Authentication
 // =========================
 
-const API_URL =
-    "http://localhost:3000";
+const API_URL = "https://scrabble-game-bhhj.onrender.com";
 
 
 const authOverlay =
