@@ -1,88 +1,670 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
     <title>Scrabble Game</title>
-    <link rel="stylesheet" href="scrabble.css">
+
+    <link
+        rel="stylesheet"
+        href="scrabble.css"
+    >
 </head>
+
+
 <body>
-    <div id="setup-overlay">
-        <div class="setup-card">
-            <h1>Scrabble</h1>
-            <p>Select number of players:</p>
-            <div class="player-buttons">
-                <button onclick="startGame(1)">1 Player</button>
-                <button onclick="startGame(2)">2 Players</button>
-                <button onclick="startGame(3)">3 Players</button>
-                <button onclick="startGame(4)">4 Players</button>
+
+    <!-- =====================================================
+         LOGIN / REGISTER
+    ====================================================== -->
+
+    <div id="auth-overlay">
+
+        <div class="auth-card">
+
+            <!-- LOGIN -->
+
+            <div id="login-form">
+
+                <h1>Scrabble</h1>
+
+                <h2>Login</h2>
+
+                <input
+                    type="text"
+                    id="login-username"
+                    placeholder="Username"
+                    autocomplete="username"
+                >
+
+                <input
+                    type="password"
+                    id="login-password"
+                    placeholder="Password"
+                    autocomplete="current-password"
+                >
+
+                <button
+                    id="login-button"
+                    type="button"
+                >
+                    Login
+                </button>
+
+                <p id="login-message"></p>
+
+                <p>
+                    Don't have an account?
+
+                    <button
+                        id="show-register"
+                        type="button"
+                    >
+                        Register
+                    </button>
+                </p>
+
             </div>
+
+
+            <!-- REGISTER -->
+
+            <div
+                id="register-form"
+                style="display: none;"
+            >
+
+                <h1>Scrabble</h1>
+
+                <h2>Register</h2>
+
+                <input
+                    type="text"
+                    id="register-username"
+                    placeholder="Username"
+                    autocomplete="username"
+                >
+
+                <input
+                    type="email"
+                    id="register-email"
+                    placeholder="Email"
+                    autocomplete="email"
+                >
+
+                <input
+                    type="password"
+                    id="register-password"
+                    placeholder="Password"
+                    autocomplete="new-password"
+                >
+
+                <button
+                    id="register-button"
+                    type="button"
+                >
+                    Register
+                </button>
+
+                <p id="register-message"></p>
+
+                <p>
+                    Already have an account?
+
+                    <button
+                        id="show-login"
+                        type="button"
+                    >
+                        Login
+                    </button>
+                </p>
+
+            </div>
+
         </div>
+
     </div>
 
-    <div id="game-container" style="display: none;">
-        
-        <div id="game-stage">
-            <div id="board-container">
-                <div id="player-turn-indicator">Waiting...</div>
-                <div class="board-and-actions">
-                    <div id="scrabble-board"></div>
 
-                    <div class="side-actions">
-                        <div class="main-actions">
-                            <button id="submit-word">Submit Word</button>
-                            <button id="exchange-tiles">Exchange Tiles</button>
-                            <button id="pass-turn">Pass</button>
-                            <button id="reset-board">Reset</button>
-                        </div>
 
-                        <div class="scores-row">
-                            <button id="scores">Scores</button>
-                        </div>
+    <!-- =====================================================
+         SETUP / LOBBY
+    ====================================================== -->
 
-                        <div class="tile-bag-panel" aria-label="Tiles remaining in bag">
-                            <div class="tile-bag-header">
-                                <span class="tile-bag-title">Bag</span>
-                                <span class="tile-bag-total-wrap"><span id="tile-bag-total">0</span> left</span>
-                            </div>
-                            <div id="tile-bag-display" class="tile-bag-grid"></div>
-                        </div>
-                    </div>
+    <div
+        id="setup-overlay"
+        style="display: none;"
+    >
+
+        <div class="setup-card">
+
+            <h1>Scrabble</h1>
+
+
+            <!-- =================================================
+                 MAIN GAME MODE
+            ================================================== -->
+
+            <div id="game-mode-selection">
+
+                <p>How do you want to play?</p>
+
+                <div class="game-mode-buttons">
+
+                    <button
+                        id="local-game-button"
+                        type="button"
+                    >
+                        Play Local Game
+                    </button>
+
+                    <button
+                        id="create-game-button"
+                        type="button"
+                    >
+                        Create Online Game
+                    </button>
+
+                    <button
+                        id="join-game-button"
+                        type="button"
+                    >
+                        Join Online Game
+                    </button>
+
                 </div>
+
+
+                <!-- YOUR GAMES -->
+
+                <div
+                    id="my-games-section"
+                    style="display: none;"
+                >
+
+                    <h2>Your Games</h2>
+
+                    <div id="my-games-list"></div>
+
+                    <p
+                        id="my-games-empty"
+                        style="display: none;"
+                    >
+                        You don't have any active games yet.
+                    </p>
+
+                </div>
+
             </div>
 
-            <div id="player-area-1" class="player-side pos-left"></div>
-            <div id="player-area-2" class="player-side pos-right"></div>
-            <div id="player-area-3" class="player-side pos-top"></div>
-            <div id="player-area-4" class="player-side pos-bottom"></div>
-        </div>
 
-        <div id="scores-modal" class="scores-modal" style="display: none;">
-            <div class="scores-modal-card">
-                <div class="scores-modal-header">
-                    <h3>Scores</h3>
-                    <button id="close-scores" class="scores-close" type="button">Close</button>
+
+            <!-- =================================================
+                 LOCAL GAME
+            ================================================== -->
+
+            <div
+                id="local-player-count"
+                style="display: none;"
+            >
+
+                <p>How many players?</p>
+
+                <div class="player-buttons">
+
+                    <button
+                        onclick="startGame(1, false)"
+                        type="button"
+                    >
+                        1 Player
+                    </button>
+
+                    <button
+                        onclick="startGame(2, false)"
+                        type="button"
+                    >
+                        2 Players
+                    </button>
+
+                    <button
+                        onclick="startGame(3, false)"
+                        type="button"
+                    >
+                        3 Players
+                    </button>
+
+                    <button
+                        onclick="startGame(4, false)"
+                        type="button"
+                    >
+                        4 Players
+                    </button>
+
                 </div>
 
+                <button
+                    class="back-setup-button"
+                    id="back-from-local"
+                    type="button"
+                >
+                    Back
+                </button>
+
+            </div>
+
+
+
+            <!-- =================================================
+                 CREATE ONLINE GAME
+            ================================================== -->
+
+            <div
+                id="online-player-count"
+                style="display: none;"
+            >
+
+                <p>How many players?</p>
+
+                <div class="player-buttons">
+
+                    <button
+                        class="online-player-button"
+                        data-players="2"
+                        type="button"
+                    >
+                        2 Players
+                    </button>
+
+                    <button
+                        class="online-player-button"
+                        data-players="3"
+                        type="button"
+                    >
+                        3 Players
+                    </button>
+
+                    <button
+                        class="online-player-button"
+                        data-players="4"
+                        type="button"
+                    >
+                        4 Players
+                    </button>
+
+                </div>
+
+                <button
+                    class="back-setup-button"
+                    id="back-from-create"
+                    type="button"
+                >
+                    Back
+                </button>
+
+            </div>
+
+
+
+            <!-- =================================================
+                 JOIN ONLINE GAME
+            ================================================== -->
+
+            <div
+                id="join-game-form"
+                style="display: none;"
+            >
+
+                <p>Game Code:</p>
+
+                <input
+                    type="text"
+                    id="room-id-input"
+                    placeholder="Enter Game Code"
+                    maxlength="8"
+                    autocomplete="off"
+                >
+
+                <button
+                    id="join-room-button"
+                    type="button"
+                >
+                    Join
+                </button>
+
+                <p id="join-game-message"></p>
+
+                <button
+                    class="back-setup-button"
+                    id="back-from-join"
+                    type="button"
+                >
+                    Back
+                </button>
+
+            </div>
+
+
+
+            <!-- =================================================
+                 WAITING ROOM
+            ================================================== -->
+
+            <div
+                id="online-waiting"
+                style="display: none;"
+            >
+
+                <h3>Waiting for players...</h3>
+
+                <p>
+                    Game Code:
+                    <span id="waiting-room-id"></span>
+                </p>
+
+                <p>Players:</p>
+
+                <ul id="waiting-players"></ul>
+
+
+                <!-- Kept for compatibility -->
+
+                <button
+                    id="start-online-game-button"
+                    style="display: none;"
+                    type="button"
+                >
+                    Start Game
+                </button>
+
+
+                <button
+                    class="back-setup-button"
+                    id="leave-waiting-button"
+                    type="button"
+                >
+                    Cancel
+                </button>
+
+            </div>
+
+
+
+            <!-- =================================================
+                 LOGOUT
+            ================================================== -->
+
+            <button
+                id="logout-button"
+                class="logout-button"
+                type="button"
+            >
+                Logout
+            </button>
+
+        </div>
+
+    </div>
+
+
+
+    <!-- =====================================================
+         GAME
+    ====================================================== -->
+
+    <div
+        id="game-container"
+        style="display: none;"
+    >
+
+        <div id="game-stage">
+
+
+            <!-- =================================================
+                 BOARD AREA
+            ================================================== -->
+
+            <div id="board-container">
+
+
+                <!-- GAME TOP BAR -->
+
+                <div class="game-top-bar">
+
+    <div
+        id="current-player-identity"
+        class="current-player-identity"
+    >
+        <span id="current-player-name">
+            Player
+        </span>
+
+        <span id="current-player-number">
+            Player 1
+        </span>
+    </div>
+
+
+    <div id="player-turn-indicator">
+        Waiting...
+    </div>
+
+
+    <button
+        id="exit-game-button"
+        class="exit-game-button"
+        type="button"
+    >
+        Exit Game
+    </button>
+
+</div>
+
+
+                <!-- BOARD + ACTIONS -->
+
+                <div class="board-and-actions">
+
+
+                    <!-- SCRABBLE BOARD -->
+
+                    <div id="scrabble-board"></div>
+
+
+
+                    <!-- SIDE CONTROLS -->
+
+                    <div class="side-actions">
+
+
+                        <!-- MAIN ACTIONS -->
+
+                        <div class="main-actions">
+
+                            <button
+                                id="submit-word"
+                                type="button"
+                            >
+                                Submit Word
+                            </button>
+
+                            <button
+                                id="exchange-tiles"
+                                type="button"
+                            >
+                                Exchange Tiles
+                            </button>
+
+                            <button
+                                id="pass-turn"
+                                type="button"
+                            >
+                                Pass
+                            </button>
+
+                            <button
+                                id="reset-board"
+                                type="button"
+                            >
+                                Reset
+                            </button>
+
+                        </div>
+
+
+
+                        <!-- SCORES -->
+
+                        <div class="scores-row">
+
+                            <button
+                                id="scores"
+                                type="button"
+                            >
+                                Scores
+                            </button>
+
+                        </div>
+
+
+
+                        <!-- TILE BAG -->
+
+                        <div
+                            class="tile-bag-panel"
+                            aria-label="Tiles remaining in bag"
+                        >
+
+                            <div class="tile-bag-header">
+
+                                <span class="tile-bag-title">
+                                    Bag
+                                </span>
+
+                                <span class="tile-bag-total-wrap">
+
+                                    <span id="tile-bag-total">
+                                        0
+                                    </span>
+
+                                    left
+
+                                </span>
+
+                            </div>
+
+                            <div
+                                id="tile-bag-display"
+                                class="tile-bag-grid"
+                            ></div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- =================================================
+                 PLAYER AREAS
+            ================================================== -->
+
+            <div
+                id="player-area-1"
+                class="player-side pos-left"
+            ></div>
+
+            <div
+                id="player-area-2"
+                class="player-side pos-right"
+            ></div>
+
+            <div
+                id="player-area-3"
+                class="player-side pos-top"
+            ></div>
+
+            <div
+                id="player-area-4"
+                class="player-side pos-bottom"
+            ></div>
+
+        </div>
+
+
+
+        <!-- =================================================
+             SCORES MODAL
+        ================================================== -->
+
+        <div
+            id="scores-modal"
+            class="scores-modal"
+            style="display: none;"
+        >
+
+            <div class="scores-modal-card">
+
+                <div class="scores-modal-header">
+
+                    <h3>Scores</h3>
+
+                    <button
+                        id="close-scores"
+                        class="scores-close"
+                        type="button"
+                    >
+                        Close
+                    </button>
+
+                </div>
+
+
                 <table class="scores-table">
+
                     <thead>
+
                         <tr>
                             <th>Player</th>
                             <th>Score</th>
                         </tr>
+
                     </thead>
+
                     <tbody id="scores-tbody"></tbody>
+
                 </table>
 
+
                 <div class="scores-modal-history">
+
                     <h4>History</h4>
+
                     <div id="history-tables"></div>
+
                 </div>
+
             </div>
+
         </div>
+
     </div>
 
+
+
+    <!-- =====================================================
+         JAVASCRIPT
+    ====================================================== -->
+
     <script src="scrabble.js"></script>
+
 </body>
 
 </html>
